@@ -1,0 +1,76 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&family=Smooch&display=swap');
+* {
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: "Montserrat", sans-serif;
+    background-color: #ffffff;
+}
+
+header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 15px;
+    background-color: #ffc400;
+    font-weight: bold;
+    box-shadow: 0px 2px 2px 0px #ffffff;
+}
+
+header img {
+    width: 60px;
+    height: auto;
+    padding: 0; 
+}   
+
+a {
+    position: relative;
+    color: #fff;
+    text-decoration: none;
+    padding: 5px 10px;
+    transition: color 0.5s ease;
+}
+
+a::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: -2px;
+    width: 100%;
+    height: 2px;
+    background: #ffff80;
+    transform: scaleX(0);
+    transform-origin: center;
+    transition: transform 0.5s ease;
+}
+
+a:hover {
+    color: #ffff80;
+}
+
+
+a:hover::after {
+    transform: scaleX(1);
+}
+
+a::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 0;
+    height: 0;
+    background-color: #ffff80;
+    transform: translate(-50%, -50%);
+    transition: width 0.5s ease, height 0.5s ease;
+    z-index: -1;
+    border-radius: 5px;
+}
+
+a:hover::before {
+    width: 100%;
+    height: 100%;
+}
