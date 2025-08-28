@@ -193,6 +193,7 @@ a:hover {
     padding-top: 10%;
 }
 
+<<<<<<< HEAD
 .canva ul {
     list-style: disc;
     margin-left: 20px;
@@ -255,4 +256,41 @@ a:hover {
 
 .sonoplastia:hover{
     transform: scale(1.2);
+=======
+.ultrans {
+    margin: 10px;
+    gap: 10px;
+    display: flex;
+    columns: 2;
+}
+
+.ultrans p {
+    text-align: center;
+    padding-top: 2px;
+    color: red;
+    font-weight: bold;
+}
+
+.ultrans img {
+    border-radius: 20px;
+}
+
+.w-20h-20object-cover {
+    border-radius: 20px;
+}
+
+.contagem {
+    display: flex;
+    height: auto;
+    gap: 5px;
+}
+
+.contagem svg {
+    fill: red;
+    width: 25px;
+}
+
+.inscritos img {
+    border-radius: 20px;
+>>>>>>> 4cee81743e25886aa5c71b28304640424e423b8d
 }
