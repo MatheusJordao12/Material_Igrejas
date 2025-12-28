@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Escala da Sonoplastia</title>
+<link rel="stylesheet" href="css/escala.css">
+<link rel="icon" type="image/png" href="imagens/channels4_profile.jpg">
+</head>
+
+<body>
+<header>
+    <img src="imagens/logo.png">
+    <div class="links">
+        <a class="cabecalho" href="">Todos materiais</a>
+        <a class="cabecalho" href="https://www.canva.com/design/DAGwv-G0l2c/OuW_SzLTfpPebx_5-tf0FA/edit" target="_blank">Canva</a>
+        <a class="cabecalho" href="index.html">Casa</a>
+    </div>
+</header>
+
+<h1>Escala da Sonoplastia</h1>
+
+<div id="adminUI" style="display:none">
+    <h2>Modo Administrador</h2>
+
+    <form id="addMemberForm">
+        <h3>Adicionar Membro</h3>
+
+        Nome: <input type="text" id="memberName" required><br>
+
+        Importância:
+        <select id="memberImportance">
+            <option value="1">1 - Normal</option>
+            <option value="2">2 - Mais importante</option>
+            <option value="3">3 - Super importante</option>
+        </select><br>
+
+        Restrições:
+        <input type="checkbox" id="restSab"> Sábado
+        <input type="checkbox" id="restDom"> Domingo
+        <input type="checkbox" id="restQua"> Quarta<br>
+
+        Carona:
+        <input type="checkbox" id="isCarona"><br>
+
+        Dependência:
+        <input type="checkbox" id="hasDependencia">
+        <select id="dependenciaSelect" disabled></select><br><br>
+
+        <button type="submit">Adicionar Membro</button>
+    </form>
+
+    <h3>Membros</h3>
+    <ul id="memberList"></ul>
+
+    <button id="generateScale">Gerar Escala</button>
+    <button id="clearScale">Limpar Escala</button>
+</div>
+
+<div id="resultado"></div>
+
+<button onclick="baixarPDF()">Baixar escala em PDF</button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+
+<script>
+(function () {
+
+const horasPorDia = { Domingo: "18:30", Quarta: "19:30", Sábado: "08:30" };
+const diasUteis = ["Domingo", "Quarta", "Sábado"];
+const diasSemana = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
+let sequenciaEscala = {};
+
+const hoje = new Date();
+const mesAtual = hoje.getMonth() + 1;
+const anoAtual = hoje.getFullYear();
+const membrosPorDia = {
+    Domingo: 3,
+    Quarta: 3,
+    Sábado: 4
+};
+
+const chaveEscala = `escala_${mesAtual}_${anoAtual}`;
+const chaveMembros = "membros_sonoplastia";
+
+let membros = JSON.parse(localStorage.getItem(chaveMembros)) || [];
+const dependenciaSelect = document.getElementById("dependenciaSelect");
+const hasDependencia = document.getElementById("hasDependencia");
+
+/* ===== ADMIN MODE ===== */
+if (sessionStorage.getItem("adminMode") === "true") {
+    document.getElementById("adminUI").style.display = "block";
+    sessionStorage.removeItem("adminMode");
+    displayMembers();
+    atualizarDependencias();
+}
+
+/* ===== LOAD SCALE ===== */
+const escalaSalva = localStorage.getItem(chaveEscala);
+if (escalaSalva) escreverNoHTML(JSON.parse(escalaSalva), mesAtual);
+
+hasDependencia.addEventListener("change", () => {
+    dependenciaSelect.disabled = !hasDependencia.checked;
+});
+
+/* ===== ADD MEMBER ===== */
+document.getElementById("addMemberForm").addEventListener("submit", e => {
+    e.preventDefault();
+
+    const name = memberName.value.trim();
+    if (!name || membros.some(m => m.name === name)) {
+        alert("Nome inválido ou já existente");
+        return;
+    }
+
+    membros.push({
+        name,
+        importance: parseInt(memberImportance.value),
+        restrictions: [
+            restSab.checked && "Sábado",
+            restDom.checked && "Domingo",
+            restQua.checked && "Quarta"
+        ].filter(Boolean),
+        carona: isCarona.checked,
+        dependencia: hasDependencia.checked ? dependenciaSelect.value || null : null
+    });
+
+    localStorage.setItem(chaveMembros, JSON.stringify(membros));
+    displayMembers();
+    atualizarDependencias();
+    e.target.reset();
+});
+
+/* ===== DISPLAY MEMBERS ===== */
+function displayMembers() {
+    memberList.innerHTML = "";
+
+    membros.forEach((m, index) => {
+        const li = document.createElement("li");
+
+        li.innerHTML = `
+            ${m.name}
+            | Imp:${m.importance}
+            | Carona:${m.carona || "Não"}
+            | Dep:${m.dependencia || "Nenhuma"}
+            <span style="cursor:pointer;color:red;margin-left:10px" title="Remover">🗑️</span>
+        `;
+
+        li.querySelector("span").onclick = () => {
+            membros.splice(index, 1);
+            localStorage.setItem(chaveMembros, JSON.stringify(membros));
+            displayMembers();
+            atualizarDependencias();
+        };
+
+        memberList.appendChild(li);
+    });
+}
+
+
+function atualizarDependencias() {
+    dependenciaSelect.innerHTML = "<option value=''>Selecione</option>";
+    membros.forEach(m => {
+        const o = document.createElement("option");
+        o.value = m.name;
+        o.textContent = m.name;
+        dependenciaSelect.appendChild(o);
+    });
+}
+
+function pesoComRevezamento(m) {
+    const seq = sequenciaEscala[m.name] || 0;
+
+    if (seq >= 2) return 0;           // 3º culto seguido → bloqueia
+    if (seq === 1) return m.importance * 0.9; // 2º seguido → −10%
+
+    return m.importance;
+}
+
+
+/* ===== CLEAR SCALE ===== */
+clearScale.onclick = () => {
+    if (!confirm("Deseja apagar a escala deste mês?")) return;
+    localStorage.removeItem(chaveEscala);
+    resultado.innerHTML = "";
+};
+
+/* ===== GENERATE SCALE ===== */
+generateScale.onclick = () => {
+    localStorage.setItem(chaveMembros, JSON.stringify(membros));
+
+    const escala = gerarEscala();
+    localStorage.setItem(chaveEscala, JSON.stringify(escala));
+    escreverNoHTML(escala, mesAtual);
+};
+
+
+function gerarEscala() {
+    const ultimoDia = new Date(anoAtual, mesAtual, 0).getDate();
+    const escala = [];
+
+    for (let d = 1; d <= ultimoDia; d++) {
+        const data = new Date(anoAtual, mesAtual - 1, d);
+        const diaNome = diasSemana[data.getDay()];
+        if (!diasUteis.includes(diaNome)) continue;
+
+        const disponiveis = membros.filter(m => {
+    if (m.restrictions.includes(diaNome)) return false;
+
+    if (m.dependencia) {
+        const dep = membros.find(x => x.name === m.dependencia);
+        if (!dep || dep.restrictions.includes(diaNome)) return false;
+    }
+
+    return true;
+    });
+        const qtdNecessaria = membrosPorDia[diaNome];
+
+    if (disponiveis.length < qtdNecessaria) continue;
+
+    let selecionados = selecionarMembros(disponiveis, qtdNecessaria);
+
+    membros.forEach(m => {
+    if (selecionados.some(s => s.name === m.name)) {
+        sequenciaEscala[m.name] = (sequenciaEscala[m.name] || 0) + 1;
+    } else {
+        sequenciaEscala[m.name] = 0;
+    }
+    });
+
+    // REGRA DE PRIORIDADE
+    const temImportancia1 = selecionados.some(m => m.importance === 1);
+    const temImportanciaAlta = selecionados.some(m => m.importance >= 2);
+
+    if (temImportancia1 && !temImportanciaAlta) {
+    // tenta novamente ignorando prioridade
+    selecionados = selecionarMembros(disponiveis, qtdNecessaria);
+    }
+
+    // ATUALIZA REVEZAMENTO (AGORA SIM)
+    membros.forEach(m => {
+        if (selecionados.some(s => s.name === m.name)) {
+            sequenciaEscala[m.name] = (sequenciaEscala[m.name] || 0) + 1;
+        } else {
+            sequenciaEscala[m.name] = 0;
+        }
+    });
+
+        /* DEPENDÊNCIA */
+        selecionados.forEach(m => {
+            if (m.dependencia && !selecionados.some(s => s.name === m.dependencia)) {
+                const dep = disponiveis.find(x => x.name === m.dependencia);
+                if (dep) selecionados[3] = dep;
+            }
+        });
+
+        escala.push({
+            data: `${String(d).padStart(2,"0")}/${String(mesAtual).padStart(2,"0")}/${anoAtual}`,
+            diaSemana: diaNome,
+            nomes: selecionados.map(m => m.name),
+            hora: horasPorDia[diaNome]
+        });
+    }
+    return escala;
+}
+
+/* ===== SELECT MEMBERS ===== */
+function selecionarMembros(lista, limite) {
+    const resultado = [];
+    const usados = new Set();
+
+    while (resultado.length < limite) {
+        const candidatos = lista.filter(m => !usados.has(m.name));
+        if (candidatos.length === 0) break;
+
+        let pesos = candidatos.map(m => pesoComRevezamento(m));
+        let total = pesos.reduce((a, b) => a + b, 0);
+
+        // fallback: ignora revezamento se todo mundo bloqueado
+        if (total === 0) {
+            pesos = candidatos.map(m => m.importance);
+            total = pesos.reduce((a, b) => a + b, 0);
+        }
+
+        let r = Math.random() * total;
+        let acumulado = 0;
+
+        const escolhido = candidatos.find((m, i) => {
+            acumulado += pesos[i];
+            return acumulado >= r;
+        });
+
+        if (!escolhido) break;
+
+        // DEPENDÊNCIA → entra o par
+        if (escolhido.dependencia) {
+            const dep = lista.find(x => x.name === escolhido.dependencia);
+            if (
+                dep &&
+                !usados.has(dep.name) &&
+                resultado.length <= limite - 2
+            ) {
+                resultado.push(escolhido, dep);
+                usados.add(escolhido.name);
+                usados.add(dep.name);
+            } else {
+                usados.add(escolhido.name);
+            }
+        } else {
+            resultado.push(escolhido);
+            usados.add(escolhido.name);
+        }
+    }
+
+    return resultado.slice(0, limite);
+}
+
+/* ===== HTML ===== */
+function escreverNoHTML(dados, mes) {
+    resultado.innerHTML = `
+    <h2>Escala do mês ${mes}</h2>
+    <table>
+        <tr><th>Data</th><th>Dia</th><th>Nomes</th><th>Hora</th></tr>
+        ${dados.map(d=>`
+        <tr>
+            <td>${d.data}</td>
+            <td>${d.diaSemana}</td>
+            <td>${d.nomes.join(", ")}</td>
+            <td>${d.hora}</td>
+        </tr>`).join("")}
+    </table>`;
+}
+
+/* ===== ADMIN COMMAND ===== */
+window.AdminSono = () => {
+    sessionStorage.setItem("adminMode","true");
+    location.reload();
+};
+
+})();
+
+/* ===== PDF ===== */
+function baixarPDF() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const tabela = document.querySelector("#resultado table");
+    if (!tabela) return alert("Nenhuma escala");
+
+    doc.text("Escala da Sonoplastia",14,20);
+    doc.autoTable({ html: tabela, startY: 30 });
+    doc.save("escala_sonoplastia.pdf");
+}
+</script>
+
+</body>
+</html>
