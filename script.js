@@ -1,4 +1,30 @@
-const isAdmin = sessionStorage.getItem("adminMode") === "true";
+// c:\Users\Mathe\OneDrive\Documentos\Material_Igrejas\script.js
+
+// Firebase Imports
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
+
+// Firebase Configuration (SUBSTITUA ESTES PLACEHOLDERS COM AS SUAS CREDENCIAIS DO FIREBASE)
+const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_AUTH_DOMAIN",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_STORAGE_BUCKET",
+    messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+    appId: "YOUR_APP_ID"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+
+// Torna as funções de autenticação do Firebase acessíveis globalmente para compatibilidade
+// com o código existente que usa `window.auth` e `window.signIn`.
+window.auth = auth;
+window.signIn = signInWithEmailAndPassword;
+
+let isAdmin = false; // Variável global para controlar o status de administrador
+
 (function () {
 
 const siglasDias = {
@@ -16,7 +42,28 @@ let ultimoRevezamento = JSON.parse(
     localStorage.getItem(chaveRevezamento)
 ) || {};
 
+// --- Lógica de Data Dinâmica ---
 const hoje = new Date();
+const diaAtual = hoje.getDate();
+let mesAlvo = hoje.getMonth() + 1; // Mês atual (1-12)
+let anoAlvo = hoje.getFullYear();
+
+// Descobrir o último dia do mês atual
+const ultimoDiaDesteMes = new Date(anoAlvo, mesAlvo, 0).getDate();
+
+// REGRA: Se faltar 10 dias ou menos para acabar o mês, gera para o PRÓXIMO
+if (ultimoDiaDesteMes - diaAtual <= 10) {
+    mesAlvo++;
+    if (mesAlvo > 12) {
+        mesAlvo = 1;
+        anoAlvo++;
+    }
+}
+
+// Chaves agora usam o mesAlvo e anoAlvo calculados
+const chaveEscala = `escala_${mesAlvo}_${anoAlvo}`;
+const chaveMembros = "membros_sonoplastia";
+// ------------------------------
 const mesAtual = hoje.getMonth() + 1;
 const anoAtual = hoje.getFullYear();
 const membrosPorDia = {
@@ -25,9 +72,6 @@ const membrosPorDia = {
     Sábado: 3
 };
 
-const chaveEscala = `escala_${mesAtual}_${anoAtual}`;
-const chaveMembros = "membros_sonoplastia";
-
 let membros = JSON.parse(localStorage.getItem(chaveMembros)) || [];
 let membroEditandoIndex = null;
 const dependenciaSelect = document.getElementById("dependenciaSelect");
@@ -35,17 +79,38 @@ const hasDependencia = document.getElementById("hasDependencia");
 const bloqueioSelect = document.getElementById("bloqueioSelect");
 const hasBloqueio = document.getElementById("hasBloqueio");
 
-/* ===== ADMIN MODE ===== */
-if (sessionStorage.getItem("adminMode") === "true") {
-    document.getElementById("adminUI").style.display = "block";
-    sessionStorage.removeItem("adminMode");
+// Função para inicializar recursos específicos do administrador
+function initAdminFeatures() {
     displayMembers();
     atualizarDependencias();
+    // Se a escala já foi carregada, renderiza novamente com os recursos de edição
+    if (loadedScale) {
+        escreverNoHTML(loadedScale, mesAlvo);
+    }
 }
 
-/* ===== LOAD SCALE ===== */
+// Carrega os dados da escala uma vez (dentro da IIFE, após mesAlvo/anoAlvo serem calculados)
+let loadedScale = null;
 const escalaSalva = localStorage.getItem(chaveEscala);
-if (escalaSalva) escreverNoHTML(JSON.parse(escalaSalva), mesAtual);
+if (escalaSalva) {
+    loadedScale = JSON.parse(escalaSalva);
+}
+
+// Verifica se há um usuário logado permanentemente no navegador (usando Firebase onAuthStateChanged)
+onAuthStateChanged(auth, (user) => {
+    if (user) {
+        isAdmin = true;
+        document.getElementById("adminUI").style.display = "block";
+        initAdminFeatures(); // Ativa os recursos de administrador
+    } else {
+        isAdmin = false;
+        document.getElementById("adminUI").style.display = "none";
+        // Se a escala já foi carregada, renderiza sem os recursos de edição
+        if (loadedScale) {
+            escreverNoHTML(loadedScale, mesAlvo);
+        }
+    }
+});
 
 hasDependencia.addEventListener("change", () => {
     dependenciaSelect.disabled = !hasDependencia.checked;
@@ -220,54 +285,42 @@ clearScale.onclick = () => {
 };
 
 /* ===== GENERATE SCALE ===== */
-generateScale.onclick = () => {
+document.getElementById("generateScale").onclick = () => {
     localStorage.setItem(chaveMembros, JSON.stringify(membros));
 
     const escala = gerarEscala();
     localStorage.setItem(chaveEscala, JSON.stringify(escala));
-    escreverNoHTML(escala, mesAtual);
+    escreverNoHTML(escala, mesAlvo); // Aqui estava mesAtual em um dos seus blocos
 };
 
-function obterNomeDia(dia) {
-    const data = new Date(anoAtual, mesAtual - 1, dia);
-
-    const dias = [
-        "Domingo",
-        "Segunda",
-        "Terça",
-        "Quarta",
-        "Quinta",
-        "Sexta",
-        "Sábado"
-    ];
-
+function obterNomeDia(dia, mes, ano) {
+    const data = new Date(ano, mes - 1, dia);
+    const dias = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
     return dias[data.getDay()];
 }
 
 function gerarEscala() {
-    const ultimoDia = new Date(anoAtual, mesAtual, 0).getDate();
+    // Usa anoAlvo e mesAlvo em vez das variáveis antigas
+    const ultimoDia = new Date(anoAlvo, mesAlvo, 0).getDate();
     const escala = [];
     const gruposRevezamento = agruparPorRevezamento(membros);
 
-    // 1. Pegamos o estado REAL de onde parou a última geração definitiva
     let estadoReal = JSON.parse(localStorage.getItem(chaveRevezamento)) || {
         "SAB": -1, "DOM": -1, "QUA": -1 
     };
 
-    // Criamos uma cópia para usar durante o loop deste mês
     let estadoLoop = { ...estadoReal };
 
     for (let d = 1; d <= ultimoDia; d++) {
-        const diaNome = obterNomeDia(d);
+        // Passa os parâmetros calculados para saber o dia da semana correto
+        const diaNome = obterNomeDia(d, mesAlvo, anoAlvo); 
         if (!diasUteis.includes(diaNome)) continue;
 
         const siglaDia = siglasDias[diaNome];
         const qtdNecessaria = membrosPorDia[diaNome];
         let nomesEscalados = [];
 
-        // REVEZAMENTO CONTÍNUO
         if (gruposRevezamento[siglaDia] && gruposRevezamento[siglaDia].length > 0) {
-            // Aqui a função escolherDoRevezamento vai pular para o próximo da fila
             const pessoa = escolherDoRevezamento(
                 gruposRevezamento[siglaDia],
                 siglaDia,
@@ -276,28 +329,25 @@ function gerarEscala() {
             nomesEscalados.push(pessoa.name);
         }
 
-        // ... resto da sua lógica de preenchimento (selecionarMembros) ...
         const disponiveis = membros.filter(m => 
             !nomesEscalados.includes(m.name) && 
             !m.restrictions.includes(diaNome) &&
             m.revezamento !== siglaDia
         );
+        
         const ajudantes = selecionarMembros(disponiveis, qtdNecessaria - nomesEscalados.length, diaNome);
         ajudantes.forEach(a => nomesEscalados.push(a.name));
 
         escala.push({
-            data: `${String(d).padStart(2,"0")}/${String(mesAtual).padStart(2,"0")}/${anoAtual}`,
+            // Formata a data com o mês correto (mesAlvo)
+            data: `${String(d).padStart(2,"0")}/${String(mesAlvo).padStart(2,"0")}/${anoAlvo}`,
             diaSemana: diaNome,
             nomes: nomesEscalados,
             hora: horasPorDia[diaNome]
         });
     }
 
-    // IMPORTANTE: Só salvamos o estado final no localStorage 
-    // se o usuário decidir que essa escala é a oficial.
-    // Como você quer que o próximo mês continue, salvamos aqui:
     localStorage.setItem(chaveRevezamento, JSON.stringify(estadoLoop));
-
     return escala;
 }
 /* ===== SELECT MEMBERS ===== */
@@ -386,7 +436,7 @@ function selecionarMembros(lista, limite, diaNome) {
 function escreverNoHTML(dados, mes) {
     const mesesNomes = ["JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO", "JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO", "NOVEMBRO", "DEZEMBRO"];
     const nomeMes = mesesNomes[mes - 1];
-    const ano = new Date().getFullYear();
+    const anoExibicao = anoAlvo;
     const total = dados.length;
     const linhas = Math.ceil(total / 2);
     const esquerda = dados.slice(0, linhas);
@@ -395,6 +445,8 @@ function escreverNoHTML(dados, mes) {
 
     // Gera os itens (as duas colunas de datas e nomes)
     const itensHTML = esquerda.map((d, i) => {
+    d.originalIndex = i; 
+    if (direita[i]) direita[i].originalIndex = i + linhas;
     const d2 = direita[i];
 
     // Função interna para criar o HTML do bloco de forma idêntica
@@ -429,7 +481,7 @@ function escreverNoHTML(dados, mes) {
                 <div>
                     <h1 style="font-family: 'Anton', sans-serif; -webkit-text-stroke: 0.15px #091d71; color: white; font-size: 158px; line-height: 0.9;">SONOPLASTIA</h1>
                     <h1 style="font-family: 'Glacial Indifference', sans-serif; color: white; font-size: 38.2px; text-align: right; letter-spacing: 4px;">
-                        ESCALA | ${nomeMes} | ${ano}
+                        ESCALA | ${nomeMes} | ${anoExibicao}
                     </h1>    
                 </div>
                 <div style="background-color: white; width: 11.9px; height: 302.6px; margin-left: 80px;"></div>
@@ -446,7 +498,7 @@ function escreverNoHTML(dados, mes) {
 
 /* ===== EDIÇÃO DINÂMICA (Dentro do escopo principal) ===== */
 document.getElementById("resultado").addEventListener("blur", (e) => {
-        if (e.target.classList.contains("nomes-escala") && sessionStorage.getItem("adminMode") === "true") {
+        if (e.target.classList.contains("nomes-escala") && isAdmin) { // Usa a variável global isAdmin
             const texto = e.target.innerText.trim();
             const itemPai = e.target.closest(".item-escala");
             if (!itemPai) return;
@@ -469,25 +521,19 @@ document.getElementById("resultado").addEventListener("blur", (e) => {
     }, true);
 
 /* ===== ADMIN COMMAND ===== */
-window.AdminSono = () => {
-    sessionStorage.setItem("adminMode","true");
-    location.reload();
+window.AdminSono = async () => {
+    const email = prompt("E-mail do Administrador:");
+    const password = prompt("Senha:");
+
+    if (email && password) {
+        try {
+            await signInWithEmailAndPassword(auth, email, password); // Usa a função importada do Firebase
+            alert("Login realizado com sucesso!");
+        } catch (error) {
+            alert("Falha no login: " + error.message);
+        }
+    }
 };
-
-if (isAdmin) {
-    document.querySelectorAll(".nomes-escala").forEach((el, index) => {
-        el.addEventListener("blur", () => {
-            const texto = el.innerText.trim();
-
-            const escala = JSON.parse(localStorage.getItem(chaveEscala));
-            if (!escala || !escala[index]) return;
-
-            escala[index].nomes = texto.split(",").map(n => n.trim());
-            localStorage.setItem(chaveEscala, JSON.stringify(escala));
-        });
-    });
-} 
-
 })();// O 'true' é vital para capturar o evento 'blur' que não borbulha normalmente // O 'true' captura o evento de desfoque (blur)
 
 /* ===== PNG ===== */
