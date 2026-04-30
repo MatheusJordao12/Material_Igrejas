@@ -666,7 +666,7 @@ await carregarEscalaDoFirebase();
 })();// O 'true' é vital para capturar o evento 'blur' que não borbulha normalmente // O 'true' captura o evento de desfoque (blur)
 
 /* ===== PNG ===== */
-function baixarPNG() {
+window.baixarPNG = function() {
     const escala = document.getElementById("escala-final");
 
     if (!escala) {
