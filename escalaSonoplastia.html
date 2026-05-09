@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Escala da Sonoplastia</title>
+<link rel="stylesheet" href="css/escala.css">
+<link rel="icon" type="image/png" href="imagens/channels4_profile.jpg">
+</head>
+
+<body>
+<header>
+    <img src="imagens/logo.png">
+    <div class="links">
+        <a class="cabecalho" href="">Todos materiais</a>
+        <a class="cabecalho" href="https://www.canva.com/design/DAGwv-G0l2c/OuW_SzLTfpPebx_5-tf0FA/edit" target="_blank">Canva</a>
+        <a class="cabecalho" href="index.html">Casa</a>
+    </div>
+</header>
+
+<h1>Escala da Sonoplastia</h1>
+
+<div id="adminUI" style="display:none">
+    <h2>Modo Administrador</h2>
+
+    <form id="addMemberForm">
+        <h3>Adicionar Membro</h3>
+
+        Nome: <input type="text" id="memberName" required><br>
+
+        Importância:
+        <select id="memberImportance">
+            <option value="1">1 - Normal</option>
+            <option value="2">2 - Mais importante</option>
+            <option value="3">3 - Super importante</option>
+        </select><br>
+
+        Restrições:
+        <input type="checkbox" id="restSab"> Sábado
+        <input type="checkbox" id="restDom"> Domingo
+        <input type="checkbox" id="restQua"> Quarta<br>
+
+        Carona:
+        <input type="checkbox" id="isCarona"><br>
+
+        Dependência:
+        <input type="checkbox" id="hasDependencia">
+        <select id="dependenciaSelect" disabled></select><br><br>
+
+        Não pode ser escalado com:
+        <input type="checkbox" id="hasBloqueio">
+        <select id="bloqueioSelect" disabled></select><br><br>
+
+        Revezamento:
+        <select id="revezamentoSelect">
+            <option value="">Nenhum</option>
+            <option value="SAB">Sábado</option>
+            <option value="DOM">Domingo</option>
+            <option value="QUA">Quarta</option>
+        </select><br><br>
+
+
+
+        <button type="submit">Adicionar Membro</button>
+    </form>
+
+    <h3>Membros</h3>
+    <ul id="memberList"></ul>
+
+    <button id="generateScale">Gerar Escala</button>
+    <button id="clearScale">Limpar Escala</button>
+</div>
+
+<div id="resultado"></div>
+
+<button onclick="baixarPNG()">Baixar escala em PDF</button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+<script type="module">
+    // c:\Users\Mathe\OneDrive\Documentos\Material_Igrejas\script.js
+
+// Firebase Imports
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
+import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
+
+// Firebase Configuration (SUBSTITUA ESTES PLACEHOLDERS COM AS SUAS CREDENCIAIS DO FIREBASE)
+const firebaseConfig = {
+    apiKey: "AIzaSyCtvEe1ZuKxnmrqNl_u4KvQej8mGdpR5oo",
+    authDomain: "escalasonoplastia.firebaseapp.com",
+    projectId: "escalasonoplastia",
+    storageBucket: "escalasonoplastia.firebasestorage.app",
+    messagingSenderId: "335509048437",
+    appId: "1:335509048437:web:53079282c89fc475cc3c3c"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// Torna as funções de autenticação do Firebase acessíveis globalmente para compatibilidade
+// com o código existente que usa `window.auth` e `window.signIn`.
+window.auth = auth;
+window.signIn = signInWithEmailAndPassword;
+
+let isAdmin = false; // Variável global para controlar o status de administrador
+
+(async function () {
+
+const siglasDias = {
+    "Domingo": "DOM",
+    "Sábado": "SAB",
+    "Quarta": "QUA"
+};
+
+const horasPorDia = { Domingo: "18:30", Quarta: "19:30", Sábado: "08:30" };
+const diasUteis = ["Domingo", "Quarta", "Sábado"];
+const diasSemana = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
+let sequenciaEscala = {};
+const chaveRevezamento = "ultimoRevezamento";
+let ultimoRevezamento = JSON.parse(
+    localStorage.getItem(chaveRevezamento)
+) || {};
+
+// --- Lógica de Data Dinâmica ---
+const hoje = new Date();
+const diaAtual = hoje.getDate();
+let mesAlvo = hoje.getMonth() + 1; // Mês atual (1-12)
+let anoAlvo = hoje.getFullYear();
+
+// Descobrir o último dia do mês atual
+const ultimoDiaDesteMes = new Date(anoAlvo, mesAlvo, 0).getDate();
+
+// REGRA: Se faltar 10 dias ou menos para acabar o mês, gera para o PRÓXIMO
+if (ultimoDiaDesteMes - diaAtual <= 10) {
+    mesAlvo++;
+    if (mesAlvo > 12) {
+        mesAlvo = 1;
+        anoAlvo++;
+    }
+}
+
+// Chaves agora usam o mesAlvo e anoAlvo calculados
+const chaveEscala = `escala_${mesAlvo}_${anoAlvo}`;
+const chaveMembros = "membros_sonoplastia";
+// ------------------------------
+const mesAtual = hoje.getMonth() + 1;
+const anoAtual = hoje.getFullYear();
+const membrosPorDia = {
+    Domingo: 3,
+    Quarta: 3,
+    Sábado: 3
+};
+
+let membros = JSON.parse(localStorage.getItem(chaveMembros)) || [];
+let membroEditandoIndex = null;
+const dependenciaSelect = document.getElementById("dependenciaSelect");
+const hasDependencia = document.getElementById("hasDependencia");
+const bloqueioSelect = document.getElementById("bloqueioSelect");
+const hasBloqueio = document.getElementById("hasBloqueio");
+
+// --- FUNÇÃO PARA SALVAR NO FIREBASE ---
+async function salvarMembrosNoFirebase() {
+    try {
+        await setDoc(doc(db, "sistema", "membros_sonoplastia"), {
+            lista: membros
+        });
+        // Mantém o localStorage como um backup offline
+        localStorage.setItem(chaveMembros, JSON.stringify(membros));
+        console.log("Membros salvos no Firebase!");
+    } catch (error) {
+        console.error("Erro ao salvar membros:", error);
+        alert("Erro ao salvar no banco de dados.");
+    }
+}
+
+// --- FUNÇÃO PARA CARREGAR DO FIREBASE ---
+async function carregarMembrosDoFirebase() {
+    try {
+        const docSnap = await getDoc(doc(db, "sistema", "membros_sonoplastia"));
+        if (docSnap.exists()) {
+            membros = docSnap.data().lista;
+        } else {
+            // Se não houver nada no Firebase, tenta pegar o que estava no localStorage
+            const local = localStorage.getItem(chaveMembros);
+            membros = local ? JSON.parse(local) : [];
+        }
+        displayMembers();
+        atualizarDependencias();
+    } catch (error) {
+        console.error("Erro ao carregar membros:", error);
+    }
+}
+
+// Função para inicializar recursos específicos do administrador
+function initAdminFeatures() {
+    displayMembers();
+    atualizarDependencias();
+    // Se a escala já foi carregada, renderiza novamente com os recursos de edição
+    if (loadedScale) {
+        escreverNoHTML(loadedScale, mesAlvo);
+    }
+}
+
+// Carrega os dados da escala uma vez (dentro da IIFE, após mesAlvo/anoAlvo serem calculados)
+let loadedScale = null;
+
+async function carregarEscalaDoFirebase() {
+    const docSnap = await getDoc(doc(db, "escalas", chaveEscala));
+    if (docSnap.exists()) {
+        loadedScale = docSnap.data().dados;
+    } else {
+        const local = localStorage.getItem(chaveEscala);
+        if (local) loadedScale = JSON.parse(local);
+    }
+    if (loadedScale) escreverNoHTML(loadedScale, mesAlvo);
+}
+
+// Verifica se há um usuário logado permanentemente no navegador (usando Firebase onAuthStateChanged)
+onAuthStateChanged(auth, (user) => {
+    if (user) {
+        isAdmin = true;
+        document.getElementById("adminUI").style.display = "block";
+        initAdminFeatures(); // Ativa os recursos de administrador
+    } else {
+        isAdmin = false;
+        document.getElementById("adminUI").style.display = "none";
+        // Se a escala já foi carregada, renderiza sem os recursos de edição
+        if (loadedScale) {
+            escreverNoHTML(loadedScale, mesAlvo);
+        }
+    }
+});
+
+hasDependencia.addEventListener("change", () => {
+    dependenciaSelect.disabled = !hasDependencia.checked;
+});
+
+hasBloqueio.addEventListener("change", () => {
+    bloqueioSelect.disabled = !hasBloqueio.checked;
+});
+
+
+/* ===== ADD MEMBER ===== */
+document.getElementById("addMemberForm").addEventListener("submit", async e => {
+    e.preventDefault();
+
+    const name = memberName.value.trim();
+    if (!name) {
+        alert("Nome inválido");
+        return;
+    }
+
+    if (
+        membroEditandoIndex === null &&
+        membros.some(m => m.name === name)
+    ) {
+        alert("Nome já existente");
+        return;
+    }
+
+    const dados = {
+        name,
+        importance: parseInt(memberImportance.value),
+        restrictions: [
+            restSab.checked && "Sábado",
+            restDom.checked && "Domingo",
+            restQua.checked && "Quarta"
+        ].filter(Boolean),
+        carona: isCarona.checked,
+        dependencia: hasDependencia.checked ? dependenciaSelect.value || null : null,
+        bloqueio: hasBloqueio.checked ? bloqueioSelect.value || null : null,
+        revezamento: revezamentoSelect.value || null
+    };
+
+    if (membroEditandoIndex !== null) {
+        membros[membroEditandoIndex] = dados;
+        membroEditandoIndex = null;
+    } else {
+        membros.push(dados);
+    }
+
+    await salvarMembrosNoFirebase();
+    displayMembers();
+    atualizarDependencias();
+    e.target.reset();
+});
+
+/* ===== DISPLAY MEMBERS ===== */
+function displayMembers() {
+    memberList.innerHTML = "";
+
+    membros.forEach((m, index) => {
+        const li = document.createElement("li");
+
+        li.innerHTML = `
+            ${m.name}
+            | Imp:${m.importance}
+            | Carona:${m.carona || "Não"}
+            | Dep:${m.dependencia || "Nenhuma"}
+            | Bloq:${m.bloqueio || "Nenhum"}
+            | Rev:${m.revezamento || "—"}
+            <span class="editar" style="cursor:pointer;margin-left:10px" title="Editar">✏️</span>
+            <span class="remover" style="cursor:pointer;color:red;margin-left:5px" title="Remover">🗑️</span>
+        `;
+
+        li.querySelector(".remover").onclick = async () => {
+            membros.splice(index, 1);
+            await salvarMembrosNoFirebase();
+            displayMembers();
+            atualizarDependencias();
+        };
+
+        li.querySelector(".editar").onclick = () => editarMembro(index);
+
+        memberList.appendChild(li);
+    });
+}
+
+
+function atualizarDependencias() {
+    dependenciaSelect.innerHTML = "<option value=''>Selecione</option>";
+    bloqueioSelect.innerHTML = "<option value=''>Selecione</option>";
+
+    membros.forEach(m => {
+        const o1 = document.createElement("option");
+        o1.value = m.name;
+        o1.textContent = m.name;
+        dependenciaSelect.appendChild(o1);
+
+        const o2 = document.createElement("option");
+        o2.value = m.name;
+        o2.textContent = m.name;
+        bloqueioSelect.appendChild(o2);
+    });
+}
+
+function agruparPorRevezamento(membros) {
+    const grupos = {};
+
+    membros.forEach(m => {
+        if (m.revezamento) {
+            if (!grupos[m.revezamento]) {
+                grupos[m.revezamento] = [];
+            }
+            grupos[m.revezamento].push(m);
+        }
+    });
+
+    return grupos;
+}
+
+function escolherDoRevezamento(grupo, chave, estadoTemp) {
+    // Busca o índice global. Se não existir, começa do 0.
+    let ultimo = estadoTemp[chave] !== undefined ? estadoTemp[chave] : -1;
+    
+    // Calcula o próximo (ciclo entre os membros do grupo)
+    const proximo = (ultimo + 1) % grupo.length;
+    
+    // Atualiza o estado global
+    estadoTemp[chave] = proximo;
+    
+    return grupo[proximo];
+}
+
+function pesoComRevezamento(m) {
+    const seq = sequenciaEscala[m.name] || 0;
+
+    if (seq >= 2) return 0;           // 3º culto seguido → bloqueia
+    if (seq === 1) return m.importance * 0.9; // 2º seguido → −10%
+
+    return m.importance;
+}
+
+function editarMembro(index) {
+    const m = membros[index];
+    membroEditandoIndex = index;
+
+    memberName.value = m.name;
+    memberImportance.value = m.importance;
+
+    restSab.checked = m.restrictions.includes("Sábado");
+    restDom.checked = m.restrictions.includes("Domingo");
+    restQua.checked = m.restrictions.includes("Quarta");
+
+    isCarona.checked = m.carona;
+
+    hasDependencia.checked = !!m.dependencia;
+    dependenciaSelect.disabled = !hasDependencia.checked;
+    dependenciaSelect.value = m.dependencia || "";
+
+    hasBloqueio.checked = !!m.bloqueio;
+    bloqueioSelect.disabled = !hasBloqueio.checked;
+    bloqueioSelect.value = m.bloqueio || "";
+
+    revezamentoSelect.value = m.revezamento || "";
+}
+
+
+/* ===== CLEAR SCALE ===== */
+clearScale.onclick = () => {
+    if (!confirm("Deseja apagar a escala deste mês?")) return;
+    localStorage.removeItem(chaveEscala);
+    resultado.innerHTML = "";
+};
+
+/* ===== GENERATE SCALE ===== */
+document.getElementById("generateScale").onclick = async () => {
+    await salvarMembrosNoFirebase();
+
+    const escala = gerarEscala();
+    await setDoc(doc(db, "escalas", chaveEscala), { dados: escala });
+    escreverNoHTML(escala, mesAlvo); // Aqui estava mesAtual em um dos seus blocos
+};
+
+function obterNomeDia(dia, mes, ano) {
+    const data = new Date(ano, mes - 1, dia);
+    const dias = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+    return dias[data.getDay()];
+}
+
+function gerarEscala() {
+    // Usa anoAlvo e mesAlvo em vez das variáveis antigas
+    const ultimoDia = new Date(anoAlvo, mesAlvo, 0).getDate();
+    const escala = [];
+    const gruposRevezamento = agruparPorRevezamento(membros);
+
+    let estadoReal = JSON.parse(localStorage.getItem(chaveRevezamento)) || {
+        "SAB": -1, "DOM": -1, "QUA": -1 
+    };
+
+    let estadoLoop = { ...estadoReal };
+
+    for (let d = 1; d <= ultimoDia; d++) {
+        // Passa os parâmetros calculados para saber o dia da semana correto
+        const diaNome = obterNomeDia(d, mesAlvo, anoAlvo); 
+        if (!diasUteis.includes(diaNome)) continue;
+
+        const siglaDia = siglasDias[diaNome];
+        const qtdNecessaria = membrosPorDia[diaNome];
+        let nomesEscalados = [];
+
+        if (gruposRevezamento[siglaDia] && gruposRevezamento[siglaDia].length > 0) {
+            const pessoa = escolherDoRevezamento(
+                gruposRevezamento[siglaDia],
+                siglaDia,
+                estadoLoop
+            );
+            nomesEscalados.push(pessoa.name);
+        }
+
+        const disponiveis = membros.filter(m => 
+            !nomesEscalados.includes(m.name) && 
+            !m.restrictions.includes(diaNome) &&
+            m.revezamento !== siglaDia
+        );
+        
+        const ajudantes = selecionarMembros(disponiveis, qtdNecessaria - nomesEscalados.length, diaNome);
+        ajudantes.forEach(a => nomesEscalados.push(a.name));
+
+        escala.push({
+            // Formata a data com o mês correto (mesAlvo)
+            data: `${String(d).padStart(2,"0")}/${String(mesAlvo).padStart(2,"0")}/${anoAlvo}`,
+            diaSemana: diaNome,
+            nomes: nomesEscalados,
+            hora: horasPorDia[diaNome]
+        });
+    }
+
+    localStorage.setItem(chaveRevezamento, JSON.stringify(estadoLoop));
+    return escala;
+}
+/* ===== SELECT MEMBERS ===== */
+function selecionarMembros(lista, limite, diaNome) {
+    const resultado = [];
+    const usados = new Set();
+
+    const siglaDia =
+        diaNome === "Sábado" ? "SAB" :
+        diaNome === "Domingo" ? "DOM" :
+        diaNome === "Quarta" ? "QUA" : null;
+
+    while (resultado.length < limite) {
+        const candidatos = lista.filter(m => !usados.has(m.name));
+        if (candidatos.length === 0) break;
+
+        let pesos = candidatos.map(m => pesoComRevezamento(m));
+        let total = pesos.reduce((a, b) => a + b, 0);
+
+        if (total === 0) {
+            pesos = candidatos.map(m => m.importance);
+            total = pesos.reduce((a, b) => a + b, 0);
+        }
+
+        let r = Math.random() * total;
+        let acumulado = 0;
+
+        const escolhido = candidatos.find((m, i) => {
+            acumulado += pesos[i];
+            return acumulado >= r;
+        });
+
+        if (!escolhido) break;
+
+        // BLOQUEIO
+        const conflitoBloqueio = resultado.some(r =>
+            r.bloqueio === escolhido.name ||
+            escolhido.bloqueio === r.name
+        );
+
+        if (conflitoBloqueio) {
+            usados.add(escolhido.name);
+            continue;
+        }
+
+        // REVEZAMENTO POR DIA
+        if (
+            siglaDia &&
+            escolhido.revezamento === siglaDia &&
+            resultado.some(r => r.revezamento === siglaDia)
+        ) {
+            usados.add(escolhido.name);
+            continue;
+        }
+
+        // DEPENDÊNCIA
+        if (escolhido.dependencia) {
+            const dep = lista.find(x => x.name === escolhido.dependencia);
+
+            if (
+                dep &&
+                !usados.has(dep.name) &&
+                resultado.length <= limite - 2 &&
+                !resultado.some(r =>
+                    r.bloqueio === dep.name ||
+                    dep.bloqueio === r.name
+                )
+            ) {
+                resultado.push(escolhido, dep);
+                usados.add(escolhido.name);
+                usados.add(dep.name);
+            } else {
+                usados.add(escolhido.name);
+            }
+        } else {
+            resultado.push(escolhido);
+            usados.add(escolhido.name);
+        }
+    }
+
+    return resultado.slice(0, limite);
+}
+
+
+/* ===== HTML ===== */
+function escreverNoHTML(dados, mes) {
+    const mesesNomes = ["JANEIRO", "FEVEREIRO", "MARÇO", "ABRIL", "MAIO", "JUNHO", "JULHO", "AGOSTO", "SETEMBRO", "OUTUBRO", "NOVEMBRO", "DEZEMBRO"];
+    const nomeMes = mesesNomes[mes - 1];
+    const anoExibicao = anoAlvo;
+    const total = dados.length;
+    const linhas = Math.ceil(total / 2);
+    const esquerda = dados.slice(0, linhas);
+    const direita = dados.slice(linhas);
+
+
+    // Gera os itens (as duas colunas de datas e nomes)
+    const itensHTML = esquerda.map((d, i) => {
+    d.originalIndex = i; 
+    if (direita[i]) direita[i].originalIndex = i + linhas;
+    const d2 = direita[i];
+
+    // Função interna para criar o HTML do bloco de forma idêntica
+    const criarBloco = (dadosDia) => {
+        if (!dadosDia) return `<div></div>`;
+        return `
+        <div class="item-escala">
+            <div class="data-container">
+                <div class="data-box"><p>${dadosDia.data.split('/')[0]}</p></div>
+                <div class="sigla-dia"><p>${siglasDias[dadosDia.diaSemana] || "---"}</p></div>
+            </div>
+            <div class="nomes-box">
+                <p class="nomes-escala" 
+                   data-index="${dadosDia.originalIndex}" 
+                   ${isAdmin ? 'contenteditable="true"' : ''}>
+                    ${dadosDia.nomes.join(", ")}
+                </p>
+            </div>
+        </div>`;
+    };
+
+    return criarBloco(d) + criarBloco(d2);
+}).join("");
+
+
+
+    // Insere no elemento #resultado
+    document.getElementById("resultado").innerHTML = `
+    <div class="escala-container-wrapper">
+        <div class="background-escala" id="escala-final">
+            <div class="header-escala">
+                <div>
+                    <h1 style="font-family: 'Anton', sans-serif; -webkit-text-stroke: 0.15px #091d71; color: white; font-size: 158px; line-height: 0.9;">SONOPLASTIA</h1>
+                    <h1 style="font-family: 'Glacial Indifference', sans-serif; color: white; font-size: 38.2px; text-align: right; letter-spacing: 4px;">
+                        ESCALA | ${nomeMes} | ${anoExibicao}
+                    </h1>    
+                </div>
+                <div style="background-color: white; width: 11.9px; height: 302.6px; margin-left: 80px;"></div>
+                <img src="imagens/logoredondo.png" alt="Logo" style="width: 302.6px; height: 302.6px; margin-left: 40px;">
+            </div>
+
+            <div class="grid-escala">
+                ${itensHTML}
+            </div>
+        </div>
+    </div>`;
+}
+
+
+/* ===== EDIÇÃO DINÂMICA (Dentro do escopo principal) ===== */
+document.getElementById("resultado").addEventListener("blur", async (e) => {
+        if (e.target.classList.contains("nomes-escala") && isAdmin) { // Usa a variável global isAdmin
+            const texto = e.target.innerText.trim();
+            const itemPai = e.target.closest(".item-escala");
+            if (!itemPai) return;
+
+            const dataBox = itemPai.querySelector(".data-box p");
+            const diaTexto = dataBox.innerText.padStart(2, '0');
+            
+            const docSnap = await getDoc(doc(db, "escalas", chaveEscala));
+            let escala = docSnap.exists() ? docSnap.data().dados : loadedScale;
+
+            if (!escala) return;
+
+            const indexNaEscala = escala.findIndex(item => item.data.startsWith(diaTexto));
+            
+            if (indexNaEscala !== -1) {
+                escala[indexNaEscala].nomes = texto.split(",").map(n => n.trim());
+                await setDoc(doc(db, "escalas", chaveEscala), { dados: escala });
+                console.log(`Alteração salva para o dia ${diaTexto}`);
+            }
+        }
+    }, true);
+
+/* ===== ADMIN COMMAND ===== */
+window.AdminSono = async () => {
+    const email = prompt("E-mail do Administrador:");
+    const password = prompt("Senha:");
+
+    if (email && password) {
+        try {
+            await signInWithEmailAndPassword(auth, email, password); // Usa a função importada do Firebase
+            alert("Login realizado com sucesso!");
+        } catch (error) {
+            alert("Falha no login: " + error.message);
+        }
+    }
+};
+
+// Inicialização Assíncrona
+await carregarMembrosDoFirebase();
+await carregarEscalaDoFirebase();
+
+})();// O 'true' é vital para capturar o evento 'blur' que não borbulha normalmente // O 'true' captura o evento de desfoque (blur)
+
+/* ===== PNG ===== */
+window.baixarPNG = function() {
+    const escala = document.getElementById("escala-final");
+
+    if (!escala) {
+        alert("Escala não encontrada");
+        return;
+    }
+
+    // Remove o zoom
+    escala.classList.add("sem-zoom");
+
+    setTimeout(() => {
+        html2canvas(escala, {
+            scale: 1,
+            useCORS: true,
+            backgroundColor: null
+        }).then(canvas => {
+            const link = document.createElement("a");
+            link.download = "escala_sonoplastia.png";
+            link.href = canvas.toDataURL("image/png");
+            link.click();
+
+            // Restaura o zoom
+            escala.classList.remove("sem-zoom");
+        });
+    }, 50);
+}
+</script>
+</body>
+</html>
